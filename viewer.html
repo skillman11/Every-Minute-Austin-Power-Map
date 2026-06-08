@@ -1,12 +1,13 @@
 <!--
-  viewer.html v1.0
-  Purpose: Browser-based dashboard for viewing historical Austin Energy outage data
-  How it works: Fetches .jsonl snapshot files from the GitHub repo (skillman11/Austin-Power-Outages-History)
-                and displays outage counts over time as a chart plus a list of outage events.
+  viewer.html v2.0
+  Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
+  How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
+                over time as a chart, plus plots individual outage locations on a Leaflet map.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
   Hosted at: https://skillman11.github.io/Austin-Power-Outages-History/viewer.html
-  v1.0 - Initial version
+  v1.0 - Initial version, chart and outage event list only
+  v2.0 - Added Leaflet map with outage location markers, time slider to replay the day
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -15,39 +16,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Austin Energy Outage History</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px; }
   h1 { font-size: 22px; font-weight: 500; color: #f1f5f9; margin-bottom: 4px; }
   .subtitle { font-size: 13px; color: #64748b; margin-bottom: 24px; }
-  .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
-  select, input[type="date"] { background: #1e2433; border: 0.5px solid #334155; color: #e2e8f0; padding: 8px 12px; border-radius: 8px; font-size: 13px; cursor: pointer; }
   button { background: #1e2433; border: 0.5px solid #334155; color: #e2e8f0; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; transition: background 0.15s; }
   button:hover { background: #273044; }
   button.primary { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
   button.primary:hover { background: #1e40af; }
+  .repo-input { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+  .repo-input input { flex: 1; min-width: 140px; background: #1e2433; border: 0.5px solid #334155; color: #e2e8f0; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
   .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .metric { background: #1e2433; border: 0.5px solid #1e3a5f; border-radius: 12px; padding: 16px 20px; }
   .metric-label { font-size: 12px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
   .metric-value { font-size: 28px; font-weight: 500; color: #f1f5f9; }
   .metric-value.danger { color: #f87171; }
   .metric-value.ok { color: #4ade80; }
-  .chart-card { background: #1e2433; border: 0.5px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
-  .chart-title { font-size: 14px; font-weight: 500; color: #94a3b8; margin-bottom: 16px; }
-  .chart-wrap { position: relative; width: 100%; height: 260px; }
-  .events { background: #1e2433; border: 0.5px solid #334155; border-radius: 12px; padding: 20px; }
-  .events-title { font-size: 14px; font-weight: 500; color: #94a3b8; margin-bottom: 16px; }
-  .event-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 0.5px solid #1e293b; font-size: 13px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+  .card { background: #1e2433; border: 0.5px solid #334155; border-radius: 12px; padding: 20px; }
+  .card-title { font-size: 14px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
+  .chart-wrap { position: relative; width: 100%; height: 220px; }
+  #map { height: 380px; border-radius: 8px; }
+  .slider-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .slider-row input[type=range] { flex: 1; accent-color: #ef4444; }
+  .slider-label { font-size: 12px; color: #64748b; min-width: 70px; text-align: right; }
+  .event-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 0.5px solid #1e293b; font-size: 13px; }
   .event-row:last-child { border-bottom: none; }
   .event-time { color: #64748b; }
   .event-customers { font-weight: 500; color: #f87171; }
   .event-outages { color: #94a3b8; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-  .dot-red { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
-  .dot-green { background: #22c55e; }
+  .dot-red { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; margin-right: 6px; }
   .loading { text-align: center; padding: 60px; color: #64748b; font-size: 14px; }
-  .repo-input { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
-  .repo-input input { flex: 1; min-width: 140px; background: #1e2433; border: 0.5px solid #334155; color: #e2e8f0; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+  .no-geo { font-size: 12px; color: #475569; padding: 12px 0; }
 </style>
 </head>
 <body>
@@ -63,42 +67,96 @@
 </div>
 
 <div id="metrics" class="metrics" style="display:none">
-  <div class="metric">
-    <div class="metric-label">Peak customers affected</div>
-    <div class="metric-value danger" id="metPeak">-</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Peak active outages</div>
-    <div class="metric-value danger" id="metOutages">-</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Snapshots collected</div>
-    <div class="metric-value" id="metSnaps">-</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">Total customers served</div>
-    <div class="metric-value ok" id="metTotal">-</div>
-  </div>
+  <div class="metric"><div class="metric-label">Peak customers affected</div><div class="metric-value danger" id="metPeak">-</div></div>
+  <div class="metric"><div class="metric-label">Peak active outages</div><div class="metric-value danger" id="metOutages">-</div></div>
+  <div class="metric"><div class="metric-label">Snapshots collected</div><div class="metric-value" id="metSnaps">-</div></div>
+  <div class="metric"><div class="metric-label">Total customers served</div><div class="metric-value ok" id="metTotal">-</div></div>
 </div>
 
-<div id="chartCard" class="chart-card" style="display:none">
-  <div class="chart-title">Customers affected over time</div>
-  <div class="chart-wrap">
-    <canvas id="outageChart" role="img" aria-label="Line chart showing customers affected by outages over time"></canvas>
+<div id="mainContent" style="display:none">
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">Customers affected over time</div>
+      <div class="chart-wrap"><canvas id="outageChart" role="img" aria-label="Line chart of customers affected over time"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Outage locations — <span id="mapTimeLabel">latest snapshot</span></div>
+      <div id="map"></div>
+      <div class="slider-row">
+        <span style="font-size:12px;color:#64748b">Earlier</span>
+        <input type="range" id="timeSlider" min="0" value="0" step="1" oninput="onSliderChange(this.value)"/>
+        <span style="font-size:12px;color:#64748b">Latest</span>
+      </div>
+      <div id="noGeoMsg" class="no-geo" style="display:none">No location data in this snapshot. Location data is collected starting with scrape.py v2.0.</div>
+    </div>
   </div>
-</div>
 
-<div id="eventsCard" class="events" style="display:none">
-  <div class="events-title">Outage events (snapshots with more than 0 customers affected)</div>
-  <div id="eventsList"></div>
+  <div class="card">
+    <div class="card-title">Outage events (snapshots with more than 0 customers affected)</div>
+    <div id="eventsList"></div>
+  </div>
 </div>
 
 <div id="statusMsg" class="loading">Enter your GitHub info above and click Load.</div>
 
 <script>
 let chartInstance = null;
+let map = null;
+let markers = [];
+let allRecords = [];
 
 document.getElementById('dateSelect').value = new Date().toISOString().split('T')[0];
+
+function initMap() {
+  if (map) return;
+  map = L.map('map').setView([30.27, -97.74], 10);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap &copy; CARTO',
+    maxZoom: 18
+  }).addTo(map);
+}
+
+function clearMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+}
+
+function showOutagesOnMap(record) {
+  clearMarkers();
+  const outages = record?.snapshot?.outages;
+  if (!outages || outages.length === 0) {
+    document.getElementById('noGeoMsg').style.display = 'block';
+    return;
+  }
+  document.getElementById('noGeoMsg').style.display = 'none';
+
+  outages.forEach(o => {
+    if (!o.latitude || !o.longitude) return;
+    const radius = Math.max(300, Math.sqrt(o.custAffected || 1) * 200);
+    const circle = L.circle([o.latitude, o.longitude], {
+      color: '#ef4444',
+      fillColor: '#ef4444',
+      fillOpacity: 0.35,
+      weight: 1.5,
+      radius: radius
+    }).addTo(map);
+
+    const cause = o.cause ? `<br>Cause: ${o.cause}` : '';
+    const etr = o.etr ? `<br>ETR: ${new Date(o.etr).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}` : '';
+    const crew = o.crewStatus ? `<br>Crew: ${o.crewStatus}` : '';
+    circle.bindPopup(`<strong>${o.custAffected || 0} customers affected</strong>${cause}${etr}${crew}`);
+    markers.push(circle);
+  });
+}
+
+function onSliderChange(val) {
+  const idx = parseInt(val);
+  const record = allRecords[idx];
+  if (!record) return;
+  const ts = new Date(record.timestamp);
+  document.getElementById('mapTimeLabel').textContent = ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:true});
+  showOutagesOnMap(record);
+}
 
 async function loadData() {
   const owner = document.getElementById('repoOwner').value.trim();
@@ -114,16 +172,16 @@ async function loadData() {
     const resp = await fetch(url);
     if (!resp.ok) {
       showStatus(resp.status === 404
-        ? `No data found for ${date}. The scraper may not have been running yet, or try a different date.`
+        ? `No data found for ${date}. Try a different date.`
         : `Error loading data: HTTP ${resp.status}`);
       return;
     }
     const text = await resp.text();
-    const records = text.trim().split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch(e) { return null; } }).filter(Boolean);
-    if (records.length === 0) { showStatus('No valid records found in the data file.'); return; }
-    renderDashboard(records);
+    allRecords = text.trim().split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch(e) { return null; } }).filter(Boolean);
+    if (allRecords.length === 0) { showStatus('No valid records found.'); return; }
+    renderDashboard(allRecords);
   } catch(e) {
-    showStatus(`Failed to load data: ${e.message}. Make sure the repository is public.`);
+    showStatus(`Failed to load: ${e.message}`);
   }
 }
 
@@ -134,7 +192,7 @@ function renderDashboard(records) {
 
   for (const rec of records) {
     const ts = new Date(rec.timestamp);
-    timestamps.push(ts.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', hour12: true}));
+    timestamps.push(ts.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:true}));
     const summary = rec.snapshot?.summary?.summaryFileData?.totals?.[0];
     const cust = summary?.total_cust_a?.val ?? 0;
     const outages = summary?.total_outages ?? 0;
@@ -151,7 +209,7 @@ function renderDashboard(records) {
   document.getElementById('metSnaps').textContent = records.length.toLocaleString();
   document.getElementById('metTotal').textContent = totalCust.toLocaleString();
   document.getElementById('metrics').style.display = 'grid';
-  document.getElementById('chartCard').style.display = 'block';
+  document.getElementById('mainContent').style.display = 'block';
 
   if (chartInstance) chartInstance.destroy();
   chartInstance = new Chart(document.getElementById('outageChart').getContext('2d'), {
@@ -164,7 +222,7 @@ function renderDashboard(records) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { color: '#475569', maxTicksLimit: 12, font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        x: { ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
         y: { ticks: { color: '#475569', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' }, min: 0 }
       }
     }
@@ -173,8 +231,18 @@ function renderDashboard(records) {
   const eventsList = document.getElementById('eventsList');
   eventsList.innerHTML = outageEvents.length === 0
     ? '<div class="event-row" style="color:#64748b">No outages detected on this date.</div>'
-    : outageEvents.map(e => `<div class="event-row"><span class="event-time"><span class="status-dot dot-red"></span>${e.time}</span><span class="event-customers">${e.cust.toLocaleString()} customers affected</span><span class="event-outages">${e.outages} active outage${e.outages !== 1 ? 's' : ''}</span></div>`).join('');
-  document.getElementById('eventsCard').style.display = 'block';
+    : outageEvents.map(e => `<div class="event-row"><span class="event-time"><span class="dot-red"></span>${e.time}</span><span class="event-customers">${e.cust.toLocaleString()} customers affected</span><span class="event-outages">${e.outages} active outage${e.outages!==1?'s':''}</span></div>`).join('');
+
+  // Set up map
+  initMap();
+  const slider = document.getElementById('timeSlider');
+  slider.max = records.length - 1;
+  slider.value = records.length - 1;
+  const lastRecord = records[records.length - 1];
+  const lastTs = new Date(lastRecord.timestamp);
+  document.getElementById('mapTimeLabel').textContent = lastTs.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', hour12:true});
+  showOutagesOnMap(lastRecord);
+  setTimeout(() => map.invalidateSize(), 100);
 }
 
 function showStatus(msg) {
@@ -184,7 +252,8 @@ function showStatus(msg) {
 }
 
 function hideAll() {
-  ['metrics','chartCard','eventsCard'].forEach(id => document.getElementById(id).style.display = 'none');
+  document.getElementById('metrics').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'none';
 }
 </script>
 </body>
