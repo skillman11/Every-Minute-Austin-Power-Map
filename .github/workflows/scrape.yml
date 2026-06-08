@@ -1,7 +1,8 @@
-# scrape.yml v1.2
+# scrape.yml v1.3
 # v1.0 - Initial version, runs every 5 minutes
 # v1.1 - Changed to every 1 minute
 # v1.2 - Pinned action versions for Node.js 24, added retry loop for push conflicts
+# v1.3 - Added mercantile and polyline dependencies for outage location scraping
 
 name: Scrape Austin Energy Outages
 
@@ -27,7 +28,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests mercantile polyline
 
       - name: Run scraper
         run: python scrape.py
