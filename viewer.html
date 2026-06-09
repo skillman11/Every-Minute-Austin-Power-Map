@@ -1,11 +1,12 @@
 <!--
-  viewer.html v2.31
+  viewer.html v2.32
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
                 over time as a chart, plus plots individual outage locations on a Leaflet map.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
   Hosted at: https://skillman11.github.io/Austin-Power-Outages-History/viewer.html
+  v2.32 - Max-width reduced to 800px, Austin Energy service area boundary overlay on map
   v2.31 - Page max-width 1100px centered, map height 640px on desktop for better aspect ratio
   v2.3 - Map zoomed to Austin Energy service area only, fixed aspect ratio height on desktop
   v2.2 - Map first full width, chart below, latest events on top, map never disappears at any resolution
@@ -32,7 +33,7 @@
     color: #e2e8f0;
     min-height: 100vh;
     padding: 16px;
-    max-width: 1100px;
+    max-width: 800px;
     margin: 0 auto;
   }
 
@@ -230,6 +231,22 @@ function initMap() {
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 18
   }).addTo(map);
+
+  // Load Austin Energy service area boundary from City of Austin open data
+  fetch('https://data.austintexas.gov/api/geospatial/i2t2-i3uy?method=export&type=GeoJSON')
+    .then(r => r.json())
+    .then(data => {
+      L.geoJSON(data, {
+        style: {
+          color: '#3b82f6',
+          weight: 2,
+          fillColor: '#3b82f6',
+          fillOpacity: 0.05,
+          dashArray: '6 4'
+        }
+      }).addTo(map);
+    })
+    .catch(e => console.log('Could not load service area boundary:', e));
 }
 
 function clearMarkers() {
