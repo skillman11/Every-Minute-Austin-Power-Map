@@ -1,11 +1,12 @@
 <!--
-  viewer.html v2.32
+  viewer.html v2.33
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
                 over time as a chart, plus plots individual outage locations on a Leaflet map.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
   Hosted at: https://skillman11.github.io/Austin-Power-Outages-History/viewer.html
+  v2.33 - Switched to light map tiles matching official AE service area map style, fixed boundary overlay
   v2.32 - Max-width reduced to 800px, Austin Energy service area boundary overlay on map
   v2.31 - Page max-width 1100px centered, map height 640px on desktop for better aspect ratio
   v2.3 - Map zoomed to Austin Energy service area only, fixed aspect ratio height on desktop
@@ -135,7 +136,7 @@
   .event-time { color: #64748b; }
   .event-customers { font-weight: 500; color: #f87171; }
   .event-outages { color: #94a3b8; font-size: 12px; }
-  .dot-red { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; margin-right: 6px; }
+  .dot-red { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #cc0000; margin-right: 6px; }
 
   .no-geo { font-size: 12px; color: #475569; padding: 8px 0; }
   .loading { text-align: center; padding: 40px 20px; color: #64748b; font-size: 14px; }
@@ -228,20 +229,20 @@ function initMap() {
     maxBounds: AE_BOUNDS,
     maxBoundsViscosity: 0.8
   }).setView(AE_CENTER, AE_ZOOM);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 18
   }).addTo(map);
 
-  // Load Austin Energy service area boundary from City of Austin open data
-  fetch('https://data.austintexas.gov/api/geospatial/i2t2-i3uy?method=export&type=GeoJSON')
+  // Load Austin Energy service area boundary from City of Austin ArcGIS service
+  fetch('https://maps.austintexas.gov/gis/rest/Shared/BoundariesGrids_2/MapServer/1/query?where=1%3D1&outFields=*&f=geojson')
     .then(r => r.json())
     .then(data => {
       L.geoJSON(data, {
         style: {
-          color: '#3b82f6',
-          weight: 2,
-          fillColor: '#3b82f6',
-          fillOpacity: 0.05,
+          color: '#e85d04',
+          weight: 2.5,
+          fillColor: '#e85d04',
+          fillOpacity: 0.06,
           dashArray: '6 4'
         }
       }).addTo(map);
@@ -266,7 +267,7 @@ function showOutagesOnMap(record) {
     if (!o.latitude || !o.longitude) return;
     const radius = Math.max(300, Math.sqrt(o.custAffected || 1) * 200);
     const circle = L.circle([o.latitude, o.longitude], {
-      color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.4, weight: 2, radius
+      color: '#cc0000', fillColor: '#ff0000', fillOpacity: 0.5, weight: 2.5, radius
     }).addTo(map);
     const cause = o.cause ? `<br>Cause: ${o.cause}` : '';
     const etr = o.etr ? `<br>ETR: ${new Date(o.etr).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}` : '';
