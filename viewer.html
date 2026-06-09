@@ -1,27 +1,30 @@
 <!--
-  viewer.html v2.40
+  viewer.html v2.42
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
-                over time as a chart, plus plots individual outage locations on a Leaflet map.
+                over time as a bar chart, plots individual outage locations on a Leaflet map,
+                and shows a scrollable event log below.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
   Hosted at: https://skillman11.github.io/Austin-Power-Outages-History/viewer.html
-  v2.40 - Removed repo/user controls (hardcoded), date picker only in header, map+chart side by side on desktop, larger fonts, dynamic viewport height
-  v2.39 - Full viewport width layout, chart and table scale to screen size, larger fonts on big displays
+  v2.42 - Fixed Leaflet load order error, map initializes after page fully loaded
+  v2.41 - Date picker inline with metrics, outage events under chart, bigger fonts, disclaimer footer
+  v2.40 - Removed repo/user controls, date picker only, map+chart side by side, bigger fonts
+  v2.39 - Full viewport width, bar chart, viewport-based heights, 4K font scaling
   v2.38 - Recentered on downtown Austin, expanded top/right, reduced bottom/left
   v2.37 - Shifted map center west to include full Lake Travis/western boundary
   v2.36 - Map height +14%, boundary dark blue, clicking outage circle zooms in and centers on it
-  v2.35 - Zoom back to 11, map height increased to 750px desktop/500px mobile, higher contrast map tiles
+  v2.35 - Zoom back to 11, map height increased, higher contrast OSM tiles
   v2.34 - Zoomed out and recentered to fit full service area boundary
-  v2.33 - Switched to light map tiles matching official AE service area map style, fixed boundary overlay
+  v2.33 - Switched to light map tiles, fixed boundary overlay
   v2.32 - Max-width reduced to 800px, Austin Energy service area boundary overlay on map
   v2.31 - Page max-width 1100px centered, map height 640px on desktop for better aspect ratio
-  v2.3 - Map zoomed to Austin Energy service area only, fixed aspect ratio height on desktop
-  v2.2 - Map first full width, chart below, latest events on top, map never disappears at any resolution
-  v2.1 - Fully responsive layout for mobile and desktop
+  v2.3  - Map zoomed to Austin Energy service area only, fixed aspect ratio height on desktop
+  v2.2  - Map first full width, chart below, latest events on top, map never disappears at any resolution
+  v2.1  - Fully responsive layout for mobile and desktop
   v2.01 - Auto-loads data on page open
-  v2.0 - Added Leaflet map with outage location markers, time slider to replay the day
-  v1.0 - Initial version, chart and outage event list only
+  v2.0  - Added Leaflet map with outage location markers, time slider to replay the day
+  v1.0  - Initial version, chart and outage event list only
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -29,9 +32,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Austin Energy Outage History</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -45,31 +48,16 @@
     margin: 0 auto;
   }
 
-  h1 { font-size: 26px; font-weight: 500; color: #f1f5f9; margin-bottom: 4px; }
-  .subtitle { font-size: 15px; color: #64748b; margin-bottom: 16px; line-height: 1.4; }
+  h1 { font-size: 26px; font-weight: 600; color: #f1f5f9; margin-bottom: 2px; }
+  .subtitle { font-size: 15px; color: #64748b; margin-bottom: 14px; }
 
-  .date-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-  .date-row label { font-size: 16px; color: #94a3b8; }
-  .date-row input[type="date"] {
-    background: #1e2433;
-    border: 0.5px solid #334155;
-    color: #e2e8f0;
-    padding: 10px 14px;
-    border-radius: 8px;
-    font-size: 16px;
-    cursor: pointer;
-  }
-
-  .metrics {
+  /* TOP ROW: metrics + date picker */
+  .top-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr 1fr auto;
     gap: 10px;
     margin-bottom: 16px;
+    align-items: stretch;
   }
   .metric {
     background: #1e2433;
@@ -77,26 +65,65 @@
     border-radius: 12px;
     padding: 12px 16px;
   }
-  .metric-label { font-size: 13px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .metric-value { font-size: 32px; font-weight: 500; color: #f1f5f9; }
+  .metric-label { font-size: 12px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric-value { font-size: 32px; font-weight: 600; color: #f1f5f9; }
   .metric-value.danger { color: #f87171; }
   .metric-value.ok { color: #4ade80; }
 
+  .date-picker {
+    background: #1e2433;
+    border: 0.5px solid #334155;
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+  }
+  .date-picker label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+  .date-picker input[type="date"] {
+    background: transparent;
+    border: none;
+    color: #f1f5f9;
+    font-size: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    width: 100%;
+  }
+
+  /* MAIN GRID: map left, right column for chart + events */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .map-card {
+    grid-row: 1;
+    background: #1e2433;
+    border: 0.5px solid #334155;
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .right-col {
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
   .card {
     background: #1e2433;
     border: 0.5px solid #334155;
     border-radius: 12px;
     padding: 16px;
-    margin-bottom: 16px;
   }
   .card-title { font-size: 16px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
 
-  /* Map: square-ish on mobile, fixed tall height on desktop */
   #map {
     width: 100%;
-    height: calc(100vw - 32px);
-    min-height: 399px;
-    max-height: 684px;
+    height: clamp(400px, 65vh, 900px);
     border-radius: 8px;
   }
 
@@ -106,7 +133,7 @@
     gap: 10px;
     margin-top: 12px;
   }
-  .slider-row span { font-size: 12px; color: #64748b; white-space: nowrap; }
+  .slider-row span { font-size: 13px; color: #64748b; white-space: nowrap; }
   .slider-row input[type=range] {
     flex: 1;
     height: 36px;
@@ -115,55 +142,66 @@
     touch-action: manipulation;
   }
 
-  .chart-wrap { position: relative; width: 100%; height: clamp(200px, 25vh, 500px); }
+  .chart-wrap {
+    position: relative;
+    width: 100%;
+    height: clamp(200px, 30vh, 450px);
+  }
 
+  /* Events table */
+  .events-card {
+    flex: 1;
+    overflow-y: auto;
+    max-height: clamp(200px, 30vh, 450px);
+  }
   .event-row {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 0;
+    padding: 11px 0;
     border-bottom: 0.5px solid #1e293b;
     font-size: 15px;
+    gap: 8px;
   }
   .event-row:last-child { border-bottom: none; }
-  .event-time { color: #64748b; }
-  .event-customers { font-weight: 500; color: #f87171; }
-  .event-outages { color: #94a3b8; font-size: 12px; }
-  .dot-red { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #cc0000; margin-right: 6px; }
+  .event-time { color: #94a3b8; white-space: nowrap; }
+  .event-customers { font-weight: 600; color: #f87171; }
+  .event-outages { color: #64748b; font-size: 13px; white-space: nowrap; }
+  .dot-red { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #cc0000; margin-right: 7px; }
 
-  .no-geo { font-size: 12px; color: #475569; padding: 8px 0; }
-  .loading { text-align: center; padding: 40px 20px; color: #64748b; font-size: 14px; }
+  .no-geo { font-size: 13px; color: #475569; padding: 8px 0; }
+  .loading { text-align: center; padding: 60px 20px; color: #64748b; font-size: 16px; }
 
-  @media (min-width: 1600px) {
-    body { font-size: 18px; }
-    h1 { font-size: 32px; }
-    .subtitle { font-size: 16px; }
-    .metric-label { font-size: 14px; }
-    .metric-value { font-size: 42px; }
-    .card-title { font-size: 18px; }
-    .event-row { font-size: 17px; padding: 14px 0; }
+  /* Disclaimer */
+  .disclaimer {
+    margin-top: 24px;
+    padding: 14px 18px;
+    background: #1a1f2e;
+    border: 0.5px solid #2d3748;
+    border-radius: 10px;
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.6;
   }
 
-  @media (min-width: 768px) {
-    body { padding: 24px; }
-    h1 { font-size: 22px; }
-    .metrics { grid-template-columns: repeat(4, 1fr); }
-    .metric-value { font-size: 28px; }
-    .chart-wrap { height: clamp(240px, 28vh, 500px); }
-    .main-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      align-items: start;
-    }
-    .main-grid .card { margin-bottom: 0; }
-    /* Desktop: map fixed height, page max width to avoid extreme stretching */
-    #map {
-      height: clamp(500px, 70vh, 1000px);
-      max-height: 1000px;
-    }
+  /* Mobile: stack everything */
+  @media (max-width: 767px) {
+    .top-row { grid-template-columns: 1fr 1fr; }
+    .top-row .date-picker { grid-column: 1 / -1; }
+    .main-grid { grid-template-columns: 1fr; }
+    .right-col { grid-row: 2; }
+    #map { height: clamp(300px, 70vw, 500px); }
+  }
+
+  /* 4K scaling */
+  @media (min-width: 1600px) {
+    h1 { font-size: 36px; }
+    .subtitle { font-size: 18px; }
+    .metric-label { font-size: 14px; }
+    .metric-value { font-size: 44px; }
+    .card-title { font-size: 20px; }
+    .event-row { font-size: 18px; padding: 14px 0; }
+    .date-picker input[type="date"] { font-size: 26px; }
   }
 </style>
 </head>
@@ -172,23 +210,23 @@
 <h1>Austin Energy Outage History</h1>
 <p class="subtitle">Data collected from Austin Energy's Kubra outage map — updated every minute</p>
 
-<div class="date-row">
-  <label for="dateSelect">Date</label>
-  <input type="date" id="dateSelect" onchange="loadData()" />
-</div>
-
-<div id="metrics" class="metrics" style="display:none">
+<!-- TOP ROW: 4 metrics + date picker -->
+<div class="top-row">
   <div class="metric"><div class="metric-label">Peak customers affected</div><div class="metric-value danger" id="metPeak">-</div></div>
   <div class="metric"><div class="metric-label">Peak outages</div><div class="metric-value danger" id="metOutages">-</div></div>
   <div class="metric"><div class="metric-label">Snapshots</div><div class="metric-value" id="metSnaps">-</div></div>
   <div class="metric"><div class="metric-label">Customers served</div><div class="metric-value ok" id="metTotal">-</div></div>
+  <div class="date-picker">
+    <label for="dateSelect">Date</label>
+    <input type="date" id="dateSelect" onchange="loadData()" />
+  </div>
 </div>
 
 <div id="mainContent" style="display:none">
-
   <div class="main-grid">
-    <!-- MAP -->
-    <div class="card">
+
+    <!-- LEFT: MAP -->
+    <div class="map-card">
       <div class="card-title">Outage locations — <span id="mapTimeLabel">latest</span></div>
       <div id="map"></div>
       <div class="slider-row">
@@ -199,22 +237,26 @@
       <div id="noGeoMsg" class="no-geo" style="display:none">No location data in this snapshot yet.</div>
     </div>
 
-    <!-- CHART -->
-    <div class="card">
-      <div class="card-title">Customers affected over time</div>
-      <div class="chart-wrap"><canvas id="outageChart" role="img" aria-label="Bar chart of customers affected over time"></canvas></div>
+    <!-- RIGHT: CHART + EVENTS -->
+    <div class="right-col">
+      <div class="card">
+        <div class="card-title">Customers affected over time</div>
+        <div class="chart-wrap"><canvas id="outageChart" role="img" aria-label="Bar chart of customers affected over time"></canvas></div>
+      </div>
+      <div class="card events-card">
+        <div class="card-title">Outage events — latest first</div>
+        <div id="eventsList"></div>
+      </div>
     </div>
-  </div>
 
-  <!-- EVENTS, LATEST ON TOP -->
-  <div class="card">
-    <div class="card-title">Outage events — latest first</div>
-    <div id="eventsList"></div>
   </div>
-
 </div>
 
 <div id="statusMsg" class="loading">Loading today's outage data...</div>
+
+<div class="disclaimer">
+  This is an unofficial tool not affiliated with Austin Energy or the City of Austin. Data is collected from publicly available sources and may be delayed, incomplete, or inaccurate. Not intended for emergency use. The developer assumes no liability for any decisions made based on this data. For official outage information contact Austin Energy at 512-322-9100 or austinenergy.com.
+</div>
 
 <script>
 let chartInstance = null;
@@ -222,12 +264,10 @@ let map = null;
 let markers = [];
 let allRecords = [];
 
-// Austin Energy service area bounds
-// SW corner: roughly Buda/Kyle area, NE corner: roughly Pflugerville/Manor
-const AE_BOUNDS = L.latLngBounds(
-  L.latLng(29.85, -98.20),  // SW
-  L.latLng(30.65, -97.25)   // NE
-);
+const REPO_OWNER = 'skillman11';
+const REPO_NAME = 'Austin-Power-Outages-History';
+
+const AE_BOUNDS = L.latLngBounds(L.latLng(29.85, -98.20), L.latLng(30.65, -97.25));
 const AE_CENTER = [30.30, -97.75];
 const AE_ZOOM = 11;
 
@@ -235,29 +275,16 @@ document.getElementById('dateSelect').value = new Date().toISOString().split('T'
 
 function initMap() {
   if (map) return;
-  map = L.map('map', {
-    maxBounds: AE_BOUNDS,
-    maxBoundsViscosity: 0.8
-  }).setView(AE_CENTER, AE_ZOOM);
+  map = L.map('map', { maxBounds: AE_BOUNDS, maxBoundsViscosity: 0.8 }).setView(AE_CENTER, AE_ZOOM);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
   }).addTo(map);
-
-  // Load Austin Energy service area boundary from City of Austin ArcGIS service
   fetch('https://maps.austintexas.gov/gis/rest/Shared/BoundariesGrids_2/MapServer/1/query?where=1%3D1&outFields=*&f=geojson')
     .then(r => r.json())
     .then(data => {
-      L.geoJSON(data, {
-        style: {
-          color: '#1a3a6b',
-          weight: 2.5,
-          fillColor: '#1a3a6b',
-          fillOpacity: 0.06,
-          dashArray: '6 4'
-        }
-      }).addTo(map);
+      L.geoJSON(data, { style: { color: '#1a3a6b', weight: 2.5, fillColor: '#1a3a6b', fillOpacity: 0.06, dashArray: '6 4' } }).addTo(map);
     })
-    .catch(e => console.log('Could not load service area boundary:', e));
+    .catch(e => console.log('Boundary load failed:', e));
 }
 
 function clearMarkers() {
@@ -283,9 +310,7 @@ function showOutagesOnMap(record) {
     const etr = o.etr ? `<br>ETR: ${new Date(o.etr).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}` : '';
     const crew = o.crewStatus ? `<br>Crew: ${o.crewStatus}` : '';
     circle.bindPopup(`<strong>${o.custAffected||0} customers affected</strong>${cause}${etr}${crew}`);
-    circle.on('click', function(e) {
-      map.setView(e.target.getLatLng(), 14, {animate: true});
-    });
+    circle.on('click', function(e) { map.setView(e.target.getLatLng(), 14, {animate: true}); });
     markers.push(circle);
   });
 }
@@ -298,13 +323,11 @@ function onSliderChange(val) {
 }
 
 async function loadData() {
-  const owner = 'skillman11';
-  const repo = 'Austin-Power-Outages-History';
   const date = document.getElementById('dateSelect').value;
-  if (!date) { showStatus('Please select a date.'); return; }
-  showStatus('Loading data from GitHub...');
-  hideAll();
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/data/${date}.jsonl`;
+  if (!date) return;
+  showStatus('Loading...');
+  document.getElementById('mainContent').style.display = 'none';
+  const url = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/data/${date}.jsonl`;
   try {
     const resp = await fetch(url);
     if (!resp.ok) {
@@ -322,6 +345,8 @@ async function loadData() {
 
 function renderDashboard(records) {
   document.getElementById('statusMsg').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'block';
+
   const timestamps=[], custAffected=[], outageEvents=[];
   let peakCust=0, peakOutages=0, totalCust=0;
 
@@ -343,24 +368,31 @@ function renderDashboard(records) {
   document.getElementById('metOutages').textContent = peakOutages.toLocaleString();
   document.getElementById('metSnaps').textContent = records.length.toLocaleString();
   document.getElementById('metTotal').textContent = totalCust.toLocaleString();
-  document.getElementById('metrics').style.display = 'grid';
-  document.getElementById('mainContent').style.display = 'block';
 
   if (chartInstance) chartInstance.destroy();
+  const fontSize = Math.max(12, Math.round(window.innerWidth / 100));
   chartInstance = new Chart(document.getElementById('outageChart').getContext('2d'), {
     type: 'bar',
-    data: { labels: timestamps, datasets: [{label:'Customers affected', data:custAffected, backgroundColor:'rgba(239,68,68,0.75)', borderColor:'#cc0000', borderWidth:1, borderRadius:3}] },
-    options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
+    data: { labels: timestamps, datasets: [{
+      label: 'Customers affected',
+      data: custAffected,
+      backgroundColor: 'rgba(239,68,68,0.75)',
+      borderColor: '#cc0000',
+      borderWidth: 1,
+      borderRadius: 3
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
       scales: {
-        x:{ticks:{color:'#475569',maxTicksLimit:8,font:{size:Math.max(11,Math.round(window.innerWidth/120))}},grid:{color:'rgba(255,255,255,0.04)'}},
-        y:{ticks:{color:'#475569',font:{size:Math.max(11,Math.round(window.innerWidth/120))}},grid:{color:'rgba(255,255,255,0.04)'},min:0}
+        x: { ticks: { color: '#94a3b8', maxTicksLimit: 8, font: { size: fontSize } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#94a3b8', font: { size: fontSize } }, grid: { color: 'rgba(255,255,255,0.06)' }, min: 0 }
       }
     }
   });
 
-  const eventsList = document.getElementById('eventsList');
   const reversed = [...outageEvents].reverse();
-  eventsList.innerHTML = reversed.length === 0
+  document.getElementById('eventsList').innerHTML = reversed.length === 0
     ? '<div class="event-row" style="color:#64748b">No outages detected on this date.</div>'
     : reversed.map(e=>`<div class="event-row"><span class="event-time"><span class="dot-red"></span>${e.time}</span><span class="event-customers">${e.cust.toLocaleString()} customers affected</span><span class="event-outages">${e.outages} outage${e.outages!==1?'s':''}</span></div>`).join('');
 
@@ -379,12 +411,8 @@ function showStatus(msg) {
   el.style.display = 'block';
   el.textContent = msg;
 }
-function hideAll() {
-  document.getElementById('metrics').style.display = 'none';
-  document.getElementById('mainContent').style.display = 'none';
-}
 
-loadData();
+document.addEventListener("DOMContentLoaded", function() { loadData(); });
 </script>
 </body>
 </html>
