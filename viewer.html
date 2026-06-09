@@ -1,5 +1,5 @@
 <!--
-  viewer.html v2.2
+  viewer.html v2.3
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
                 over time as a chart, plus plots individual outage locations on a Leaflet map.
@@ -11,6 +11,7 @@
   v2.01 - Auto-loads data on page open
   v2.1 - Fully responsive layout for mobile and desktop
   v2.2 - Map first full width, chart below, latest events on top, map never disappears at any resolution
+  v2.3 - Map zoomed to Austin Energy service area only, fixed aspect ratio height on desktop
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -90,12 +91,12 @@
   }
   .card-title { font-size: 13px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
 
-  /* Map is always full width, height scales with viewport */
+  /* Map: square-ish on mobile, fixed tall height on desktop */
   #map {
     width: 100%;
-    height: 50vw;
-    min-height: 280px;
-    max-height: 600px;
+    height: 75vw;
+    min-height: 300px;
+    max-height: 500px;
     border-radius: 8px;
   }
 
@@ -143,6 +144,11 @@
     .metrics { grid-template-columns: repeat(4, 1fr); }
     .metric-value { font-size: 28px; }
     .chart-wrap { height: 240px; }
+    /* Desktop: map is a fixed tall square-ish block */
+    #map {
+      height: 600px;
+      max-height: 600px;
+    }
   }
 </style>
 </head>
@@ -201,11 +207,23 @@ let map = null;
 let markers = [];
 let allRecords = [];
 
+// Austin Energy service area bounds
+// SW corner: roughly Buda/Kyle area, NE corner: roughly Pflugerville/Manor
+const AE_BOUNDS = L.latLngBounds(
+  L.latLng(29.95, -98.05),  // SW
+  L.latLng(30.55, -97.40)   // NE
+);
+const AE_CENTER = [30.25, -97.75];
+const AE_ZOOM = 11;
+
 document.getElementById('dateSelect').value = new Date().toISOString().split('T')[0];
 
 function initMap() {
   if (map) return;
-  map = L.map('map').setView([30.27, -97.74], 10);
+  map = L.map('map', {
+    maxBounds: AE_BOUNDS,
+    maxBoundsViscosity: 0.8
+  }).setView(AE_CENTER, AE_ZOOM);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 18
   }).addTo(map);
@@ -306,7 +324,6 @@ function renderDashboard(records) {
     }
   });
 
-  // Latest events on top
   const eventsList = document.getElementById('eventsList');
   const reversed = [...outageEvents].reverse();
   eventsList.innerHTML = reversed.length === 0
