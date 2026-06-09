@@ -1,11 +1,12 @@
 <!--
-  viewer.html v2.39
+  viewer.html v2.40
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
                 over time as a chart, plus plots individual outage locations on a Leaflet map.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
   Hosted at: https://skillman11.github.io/Austin-Power-Outages-History/viewer.html
+  v2.40 - Removed repo/user controls (hardcoded), date picker only in header, map+chart side by side on desktop, larger fonts, dynamic viewport height
   v2.39 - Full viewport width layout, chart and table scale to screen size, larger fonts on big displays
   v2.38 - Recentered on downtown Austin, expanded top/right, reduced bottom/left
   v2.37 - Shifted map center west to include full Lake Travis/western boundary
@@ -44,37 +45,25 @@
     margin: 0 auto;
   }
 
-  h1 { font-size: 20px; font-weight: 500; color: #f1f5f9; margin-bottom: 4px; }
-  .subtitle { font-size: 13px; color: #64748b; margin-bottom: 16px; line-height: 1.4; }
+  h1 { font-size: 26px; font-weight: 500; color: #f1f5f9; margin-bottom: 4px; }
+  .subtitle { font-size: 15px; color: #64748b; margin-bottom: 16px; line-height: 1.4; }
 
-  .repo-input {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+  .date-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     margin-bottom: 16px;
   }
-  .repo-input input {
-    width: 100%;
+  .date-row label { font-size: 16px; color: #94a3b8; }
+  .date-row input[type="date"] {
     background: #1e2433;
     border: 0.5px solid #334155;
     color: #e2e8f0;
-    padding: 10px 12px;
+    padding: 10px 14px;
     border-radius: 8px;
-    font-size: 14px;
-  }
-  .repo-input .load-btn {
-    grid-column: 1 / -1;
-    background: #1d4ed8;
-    border: none;
-    color: #fff;
-    padding: 12px;
-    border-radius: 8px;
-    font-size: 15px;
-    font-weight: 500;
+    font-size: 16px;
     cursor: pointer;
-    touch-action: manipulation;
   }
-  .repo-input .load-btn:active { background: #1e40af; }
 
   .metrics {
     display: grid;
@@ -88,8 +77,8 @@
     border-radius: 12px;
     padding: 12px 16px;
   }
-  .metric-label { font-size: 11px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-  .metric-value { font-size: 24px; font-weight: 500; color: #f1f5f9; }
+  .metric-label { font-size: 13px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric-value { font-size: 32px; font-weight: 500; color: #f1f5f9; }
   .metric-value.danger { color: #f87171; }
   .metric-value.ok { color: #4ade80; }
 
@@ -100,7 +89,7 @@
     padding: 16px;
     margin-bottom: 16px;
   }
-  .card-title { font-size: 13px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
+  .card-title { font-size: 16px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
 
   /* Map: square-ish on mobile, fixed tall height on desktop */
   #map {
@@ -134,9 +123,9 @@
     gap: 4px;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 0;
+    padding: 12px 0;
     border-bottom: 0.5px solid #1e293b;
-    font-size: 13px;
+    font-size: 15px;
   }
   .event-row:last-child { border-bottom: none; }
   .event-time { color: #64748b; }
@@ -160,11 +149,16 @@
   @media (min-width: 768px) {
     body { padding: 24px; }
     h1 { font-size: 22px; }
-    .repo-input { grid-template-columns: 1fr 1fr 1fr auto; }
-    .repo-input .load-btn { grid-column: auto; padding: 10px 24px; font-size: 14px; }
     .metrics { grid-template-columns: repeat(4, 1fr); }
     .metric-value { font-size: 28px; }
     .chart-wrap { height: clamp(240px, 28vh, 500px); }
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    .main-grid .card { margin-bottom: 0; }
     /* Desktop: map fixed height, page max width to avoid extreme stretching */
     #map {
       height: clamp(500px, 70vh, 1000px);
@@ -178,11 +172,9 @@
 <h1>Austin Energy Outage History</h1>
 <p class="subtitle">Data collected from Austin Energy's Kubra outage map — updated every minute</p>
 
-<div class="repo-input">
-  <input type="text" id="repoOwner" value="skillman11" placeholder="GitHub user" />
-  <input type="text" id="repoName" value="Austin-Power-Outages-History" placeholder="Repo name" />
-  <input type="date" id="dateSelect" />
-  <button class="load-btn" onclick="loadData()">Load</button>
+<div class="date-row">
+  <label for="dateSelect">Date</label>
+  <input type="date" id="dateSelect" onchange="loadData()" />
 </div>
 
 <div id="metrics" class="metrics" style="display:none">
@@ -194,22 +186,24 @@
 
 <div id="mainContent" style="display:none">
 
-  <!-- MAP FIRST, FULL WIDTH -->
-  <div class="card">
-    <div class="card-title">Outage locations — <span id="mapTimeLabel">latest</span></div>
-    <div id="map"></div>
-    <div class="slider-row">
-      <span>Earlier</span>
-      <input type="range" id="timeSlider" min="0" value="0" step="1" oninput="onSliderChange(this.value)"/>
-      <span>Latest</span>
+  <div class="main-grid">
+    <!-- MAP -->
+    <div class="card">
+      <div class="card-title">Outage locations — <span id="mapTimeLabel">latest</span></div>
+      <div id="map"></div>
+      <div class="slider-row">
+        <span>Earlier</span>
+        <input type="range" id="timeSlider" min="0" value="0" step="1" oninput="onSliderChange(this.value)"/>
+        <span>Latest</span>
+      </div>
+      <div id="noGeoMsg" class="no-geo" style="display:none">No location data in this snapshot yet.</div>
     </div>
-    <div id="noGeoMsg" class="no-geo" style="display:none">No location data in this snapshot yet.</div>
-  </div>
 
-  <!-- CHART BELOW -->
-  <div class="card">
-    <div class="card-title">Customers affected over time</div>
-    <div class="chart-wrap"><canvas id="outageChart" role="img" aria-label="Line chart of customers affected over time"></canvas></div>
+    <!-- CHART -->
+    <div class="card">
+      <div class="card-title">Customers affected over time</div>
+      <div class="chart-wrap"><canvas id="outageChart" role="img" aria-label="Bar chart of customers affected over time"></canvas></div>
+    </div>
   </div>
 
   <!-- EVENTS, LATEST ON TOP -->
@@ -304,10 +298,10 @@ function onSliderChange(val) {
 }
 
 async function loadData() {
-  const owner = document.getElementById('repoOwner').value.trim();
-  const repo = document.getElementById('repoName').value.trim();
+  const owner = 'skillman11';
+  const repo = 'Austin-Power-Outages-History';
   const date = document.getElementById('dateSelect').value;
-  if (!owner || !repo || !date) { showStatus('Please fill in all fields.'); return; }
+  if (!date) { showStatus('Please select a date.'); return; }
   showStatus('Loading data from GitHub...');
   hideAll();
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/data/${date}.jsonl`;
