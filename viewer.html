@@ -1,12 +1,14 @@
 <!--
-  viewer.html v2.44
+  viewer.html v2.45
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
-                over time as a bar chart, plots individual outage locations on a Leaflet map,
-                and shows a scrollable event log below.
+                over time as an interactive bar chart, plots individual outage locations on a
+                Leaflet map, and shows a scrollable event log. Clicking a bar jumps the map to
+                that timestamp. Slider and chart stay in sync.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
-  Hosted at: https://skillman11.github.io/Austin-Power-Outages-History/viewer.html
+  Hosted at: https://skillman11.github.io/Every-Minute-Austin-Power-Map/viewer.html
+  v2.45 - Calendar date picker, click bar to jump map, Now button, chart/slider sync, larger disclaimer
   v2.44 - Title fits one line on mobile using fluid font size
   v2.43 - Auto-refresh every 2 minutes, touch-friendly slider, smaller title on mobile
   v2.42 - Fixed Leaflet load order error, map initializes after page fully loaded
@@ -50,10 +52,18 @@
     margin: 0 auto;
   }
 
-  h1 { font-size: clamp(15px, 4vw, 20px); font-weight: 600; color: #f1f5f9; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .subtitle { font-size: 15px; color: #64748b; margin-bottom: 14px; }
+  h1 {
+    font-size: clamp(15px, 4vw, 28px);
+    font-weight: 600;
+    color: #f1f5f9;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .subtitle { font-size: 15px; color: #64748b; margin-bottom: 14px; line-height: 1.4; }
 
-  /* TOP ROW: metrics + date picker */
+  /* TOP ROW */
   .top-row {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr 1fr auto;
@@ -81,6 +91,7 @@
     flex-direction: column;
     justify-content: center;
     gap: 4px;
+    min-width: 160px;
   }
   .date-picker label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
   .date-picker input[type="date"] {
@@ -92,43 +103,33 @@
     cursor: pointer;
     outline: none;
     width: 100%;
+    color-scheme: dark;
   }
 
-  /* MAIN GRID: map left, right column for chart + events */
+  /* MAIN GRID */
   .main-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto;
     gap: 16px;
     margin-bottom: 16px;
   }
-  .map-card {
-    grid-row: 1;
+  .map-card, .card {
     background: #1e2433;
     border: 0.5px solid #334155;
     border-radius: 12px;
     padding: 16px;
   }
-  .right-col {
-    grid-row: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .card {
-    background: #1e2433;
-    border: 0.5px solid #334155;
-    border-radius: 12px;
-    padding: 16px;
-  }
+  .right-col { display: flex; flex-direction: column; gap: 16px; }
   .card-title { font-size: 16px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
 
+  /* Map */
   #map {
     width: 100%;
     height: clamp(400px, 65vh, 900px);
     border-radius: 8px;
   }
 
+  /* Slider + Now button */
   .slider-row {
     display: flex;
     align-items: center;
@@ -144,18 +145,32 @@
     touch-action: pan-x;
     -webkit-appearance: none;
   }
+  .now-btn {
+    background: #1d4ed8;
+    border: none;
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+  .now-btn:active { background: #1e40af; }
 
+  /* Chart */
   .chart-wrap {
     position: relative;
     width: 100%;
     height: clamp(200px, 30vh, 450px);
   }
 
-  /* Events table */
+  /* Events */
   .events-card {
     flex: 1;
     overflow-y: auto;
-    max-height: clamp(200px, 30vh, 450px);
+    max-height: clamp(180px, 28vh, 400px);
   }
   .event-row {
     display: flex;
@@ -165,8 +180,13 @@
     border-bottom: 0.5px solid #1e293b;
     font-size: 15px;
     gap: 8px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-radius: 4px;
   }
+  .event-row:hover { background: #273044; padding-left: 6px; }
   .event-row:last-child { border-bottom: none; }
+  .event-row.active { background: #1e3a5f; padding-left: 6px; }
   .event-time { color: #94a3b8; white-space: nowrap; }
   .event-customers { font-weight: 600; color: #f87171; }
   .event-outages { color: #64748b; font-size: 13px; white-space: nowrap; }
@@ -175,19 +195,19 @@
   .no-geo { font-size: 13px; color: #475569; padding: 8px 0; }
   .loading { text-align: center; padding: 60px 20px; color: #64748b; font-size: 16px; }
 
-  /* Disclaimer */
+  /* Disclaimer - same size as subtitle */
   .disclaimer {
     margin-top: 24px;
     padding: 14px 18px;
     background: #1a1f2e;
     border: 0.5px solid #2d3748;
     border-radius: 10px;
-    font-size: 12px;
-    color: #475569;
+    font-size: 15px;
+    color: #64748b;
     line-height: 1.6;
   }
 
-  /* Mobile: stack everything */
+  /* Mobile */
   @media (max-width: 767px) {
     .top-row { grid-template-columns: 1fr 1fr; }
     .top-row .date-picker { grid-column: 1 / -1; }
@@ -196,18 +216,16 @@
     #map { height: clamp(300px, 70vw, 500px); }
   }
 
-  /* 4K scaling */
-  @media (min-width: 768px) {
-    h1 { font-size: 28px; white-space: normal; }
-  }
+  /* 4K */
   @media (min-width: 1600px) {
-    h1 { font-size: 36px; }
+    h1 { font-size: 36px; white-space: normal; }
     .subtitle { font-size: 18px; }
     .metric-label { font-size: 14px; }
     .metric-value { font-size: 44px; }
     .card-title { font-size: 20px; }
     .event-row { font-size: 18px; padding: 14px 0; }
     .date-picker input[type="date"] { font-size: 26px; }
+    .disclaimer { font-size: 16px; }
   }
 </style>
 </head>
@@ -216,7 +234,6 @@
 <h1>Austin Energy Outage History</h1>
 <p class="subtitle">Data collected from Austin Energy's Kubra outage map — updated every minute</p>
 
-<!-- TOP ROW: 4 metrics + date picker -->
 <div class="top-row">
   <div class="metric"><div class="metric-label">Peak customers affected</div><div class="metric-value danger" id="metPeak">-</div></div>
   <div class="metric"><div class="metric-label">Peak outages</div><div class="metric-value danger" id="metOutages">-</div></div>
@@ -237,8 +254,9 @@
       <div id="map"></div>
       <div class="slider-row">
         <span>Earlier</span>
-        <input type="range" id="timeSlider" min="0" value="0" step="1" oninput="onSliderChange(this.value)"/>
+        <input type="range" id="timeSlider" min="0" value="0" step="1" oninput="jumpToIndex(parseInt(this.value))"/>
         <span>Latest</span>
+        <button class="now-btn" onclick="jumpToIndex(allRecords.length-1)">Now</button>
       </div>
       <div id="noGeoMsg" class="no-geo" style="display:none">No location data in this snapshot yet.</div>
     </div>
@@ -246,11 +264,11 @@
     <!-- RIGHT: CHART + EVENTS -->
     <div class="right-col">
       <div class="card">
-        <div class="card-title">Customers affected over time</div>
+        <div class="card-title">Customers affected over time — <span style="color:#f87171;font-size:13px">click a bar to jump to that time</span></div>
         <div class="chart-wrap"><canvas id="outageChart" role="img" aria-label="Bar chart of customers affected over time"></canvas></div>
       </div>
       <div class="card events-card">
-        <div class="card-title">Outage events — latest first</div>
+        <div class="card-title">Outage events — latest first <span style="color:#475569;font-size:13px;font-weight:400">(tap to jump)</span></div>
         <div id="eventsList"></div>
       </div>
     </div>
@@ -269,9 +287,11 @@ let chartInstance = null;
 let map = null;
 let markers = [];
 let allRecords = [];
+let currentIndex = 0;
+let outageEventIndices = []; // maps event rows to record indices
 
 const REPO_OWNER = 'skillman11';
-const REPO_NAME = 'Austin-Power-Outages-History';
+const REPO_NAME = 'Every-Minute-Austin-Power-Map';
 
 const AE_BOUNDS = L.latLngBounds(L.latLng(29.85, -98.20), L.latLng(30.65, -97.25));
 const AE_CENTER = [30.30, -97.75];
@@ -321,11 +341,37 @@ function showOutagesOnMap(record) {
   });
 }
 
-function onSliderChange(val) {
-  const record = allRecords[parseInt(val)];
-  if (!record) return;
+function jumpToIndex(idx) {
+  if (!allRecords.length) return;
+  idx = Math.max(0, Math.min(idx, allRecords.length - 1));
+  currentIndex = idx;
+
+  // Sync slider
+  document.getElementById('timeSlider').value = idx;
+
+  // Update map time label
+  const record = allRecords[idx];
   document.getElementById('mapTimeLabel').textContent = new Date(record.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true});
   showOutagesOnMap(record);
+
+  // Highlight active bar in chart
+  if (chartInstance) {
+    chartInstance.data.datasets[0].backgroundColor = chartInstance.data.datasets[0].backgroundColor.map
+      ? chartInstance.data.datasets[0].backgroundColor
+      : Array(allRecords.length).fill('rgba(239,68,68,0.75)');
+    const colors = Array(allRecords.length).fill('rgba(239,68,68,0.75)');
+    colors[idx] = 'rgba(255,200,0,0.9)';
+    chartInstance.data.datasets[0].backgroundColor = colors;
+    chartInstance.update('none');
+  }
+
+  // Highlight active event row
+  document.querySelectorAll('.event-row').forEach(r => r.classList.remove('active'));
+  const evtIdx = outageEventIndices.findIndex(i => i === idx);
+  if (evtIdx >= 0) {
+    const rows = document.querySelectorAll('.event-row');
+    if (rows[evtIdx]) rows[evtIdx].classList.add('active');
+  }
 }
 
 async function loadData() {
@@ -354,9 +400,11 @@ function renderDashboard(records) {
   document.getElementById('mainContent').style.display = 'block';
 
   const timestamps=[], custAffected=[], outageEvents=[];
+  outageEventIndices = [];
   let peakCust=0, peakOutages=0, totalCust=0;
 
-  for (const rec of records) {
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i];
     const ts = new Date(rec.timestamp);
     timestamps.push(ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true}));
     const summary = rec.snapshot?.summary?.summaryFileData?.totals?.[0];
@@ -367,7 +415,10 @@ function renderDashboard(records) {
     if (cust > peakCust) peakCust = cust;
     if (outages > peakOutages) peakOutages = outages;
     if (total > totalCust) totalCust = total;
-    if (cust > 0) outageEvents.push({time: timestamps[timestamps.length-1], cust, outages});
+    if (cust > 0) {
+      outageEvents.push({time: timestamps[timestamps.length-1], cust, outages, idx: i});
+      outageEventIndices.push(i);
+    }
   }
 
   document.getElementById('metPeak').textContent = peakCust.toLocaleString();
@@ -375,21 +426,39 @@ function renderDashboard(records) {
   document.getElementById('metSnaps').textContent = records.length.toLocaleString();
   document.getElementById('metTotal').textContent = totalCust.toLocaleString();
 
+  // Bar chart with click handler
   if (chartInstance) chartInstance.destroy();
   const fontSize = Math.max(12, Math.round(window.innerWidth / 100));
+  const colors = Array(records.length).fill('rgba(239,68,68,0.75)');
+
   chartInstance = new Chart(document.getElementById('outageChart').getContext('2d'), {
     type: 'bar',
-    data: { labels: timestamps, datasets: [{
-      label: 'Customers affected',
-      data: custAffected,
-      backgroundColor: 'rgba(239,68,68,0.75)',
-      borderColor: '#cc0000',
-      borderWidth: 1,
-      borderRadius: 3
-    }]},
+    data: {
+      labels: timestamps,
+      datasets: [{
+        label: 'Customers affected',
+        data: custAffected,
+        backgroundColor: colors,
+        borderColor: '#cc0000',
+        borderWidth: 1,
+        borderRadius: 3
+      }]
+    },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      responsive: true,
+      maintainAspectRatio: false,
+      onClick: (evt, elements) => {
+        if (elements.length > 0) jumpToIndex(elements[0].index);
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => timestamps[items[0].dataIndex],
+            label: (item) => `${item.raw} customers affected`
+          }
+        }
+      },
       scales: {
         x: { ticks: { color: '#94a3b8', maxTicksLimit: 8, font: { size: fontSize } }, grid: { color: 'rgba(255,255,255,0.04)' } },
         y: { ticks: { color: '#94a3b8', font: { size: fontSize } }, grid: { color: 'rgba(255,255,255,0.06)' }, min: 0 }
@@ -397,18 +466,26 @@ function renderDashboard(records) {
     }
   });
 
+  // Events list — latest first, clickable
   const reversed = [...outageEvents].reverse();
-  document.getElementById('eventsList').innerHTML = reversed.length === 0
-    ? '<div class="event-row" style="color:#64748b">No outages detected on this date.</div>'
-    : reversed.map(e=>`<div class="event-row"><span class="event-time"><span class="dot-red"></span>${e.time}</span><span class="event-customers">${e.cust.toLocaleString()} customers affected</span><span class="event-outages">${e.outages} outage${e.outages!==1?'s':''}</span></div>`).join('');
+  const eventsList = document.getElementById('eventsList');
+  eventsList.innerHTML = reversed.length === 0
+    ? '<div class="event-row" style="color:#64748b;cursor:default">No outages detected on this date.</div>'
+    : reversed.map((e,i) =>
+        `<div class="event-row" onclick="jumpToIndex(${e.idx})">
+          <span class="event-time"><span class="dot-red"></span>${e.time}</span>
+          <span class="event-customers">${e.cust.toLocaleString()} customers affected</span>
+          <span class="event-outages">${e.outages} outage${e.outages!==1?'s':''}</span>
+        </div>`
+      ).join('');
 
-  initMap();
+  // Slider
   const slider = document.getElementById('timeSlider');
   slider.max = records.length - 1;
-  slider.value = records.length - 1;
-  const last = records[records.length-1];
-  document.getElementById('mapTimeLabel').textContent = new Date(last.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true});
-  showOutagesOnMap(last);
+
+  // Jump to latest
+  initMap();
+  jumpToIndex(records.length - 1);
   setTimeout(() => map.invalidateSize(), 200);
 }
 
@@ -420,7 +497,6 @@ function showStatus(msg) {
 
 document.addEventListener("DOMContentLoaded", function() {
   loadData();
-  // Auto-refresh every 2 minutes to stay current
   setInterval(function() {
     const date = document.getElementById('dateSelect').value;
     const today = new Date().toISOString().split('T')[0];
