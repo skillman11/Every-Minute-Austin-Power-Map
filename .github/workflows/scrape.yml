@@ -1,47 +1,140 @@
-# scrape.yml v1.3
-# v1.0 - Initial version, runs every 5 minutes
-# v1.1 - Changed to every 1 minute
-# v1.2 - Pinned action versions for Node.js 24, added retry loop for push conflicts
+# scrape.yml v2.0
+# v2.0 - Runs 5 staggered jobs per trigger (0,1,2,3,4 min offsets) to get ~1 min sampling
+#         without relying on GitHub's unreliable 1-minute cron scheduler
+#         Each job sleeps before running so they spread across the 5-minute window
 # v1.3 - Added mercantile and polyline dependencies for outage location scraping
+# v1.2 - Pinned action versions for Node.js 24, added retry loop for push conflicts
+# v1.1 - Changed schedule from every 5 minutes to every 1 minute
+# v1.0 - Initial version, runs every 5 minutes
 
 name: Scrape Austin Energy Outages
 
 on:
   schedule:
-    - cron: '*/1 * * * *'
+    # Every 5 minutes - GitHub honors this much more reliably than every 1 minute
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
-  scrape:
+  scrape-0:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Check out repo
-        uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4.2.2
         with:
           ref: main
-
-      - name: Set up Python
-        uses: actions/setup-python@v5.6.0
+      - uses: actions/setup-python@v5.6.0
         with:
           python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install requests mercantile polyline
-
-      - name: Run scraper
+      - run: pip install requests mercantile polyline
+      - name: Run scraper (no delay)
         run: python scrape.py
-
-      - name: Commit and push data
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
           git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "Outage snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          for i in 1 2 3; do
-            git pull --rebase origin main && git push && break
-            echo "Retry $i..."
-            sleep 5
-          done
+          git commit -m "Outage snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [job 0]"
+          for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 5; done
+
+  scrape-1:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Wait 1 minute
+        run: sleep 60
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: main
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+      - run: pip install requests mercantile polyline
+      - name: Run scraper
+        run: python scrape.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Outage snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [job 1]"
+          for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 5; done
+
+  scrape-2:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Wait 2 minutes
+        run: sleep 120
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: main
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+      - run: pip install requests mercantile polyline
+      - name: Run scraper
+        run: python scrape.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Outage snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [job 2]"
+          for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 5; done
+
+  scrape-3:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Wait 3 minutes
+        run: sleep 180
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: main
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+      - run: pip install requests mercantile polyline
+      - name: Run scraper
+        run: python scrape.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Outage snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [job 3]"
+          for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 5; done
+
+  scrape-4:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Wait 4 minutes
+        run: sleep 240
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: main
+      - uses: actions/setup-python@v5.6.0
+        with:
+          python-version: '3.11'
+      - run: pip install requests mercantile polyline
+      - name: Run scraper
+        run: python scrape.py
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Outage snapshot $(date -u '+%Y-%m-%d %H:%M:%S UTC') [job 4]"
+          for i in 1 2 3; do git pull --rebase origin main && git push && break; sleep 5; done
