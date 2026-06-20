@@ -1,10 +1,14 @@
-# scrape.py v2.0
-# v1.0 - Initial version, basic state fetch only
-# v1.1 - Follows Kubra data paths to get summary outage counts
+# scrape.py v2.1
+# v2.1 - Dedupe: only writes a new record when customer count, outage count, or
+#         outage locations actually change vs the last saved record. Fixes data
+#         files growing huge (3.75MB+) from cron-job.org running every minute
+#         even when nothing changed, and removes redundant rows from the viewer.
 # v2.0 - Full quadkey tile walking to get individual outage locations with lat/lon
 #         Uses mercantile for tile math and polyline for coordinate decoding
 #         Outage data now includes latitude, longitude, customers affected, cause, ETR
 #         Linked to: scrape.yml (scheduler), viewer.html (map display)
+# v1.1 - Follows Kubra data paths to get summary outage counts
+# v1.0 - Initial version, basic state fetch only
 
 import requests
 import json
@@ -176,13 +180,47 @@ def main():
                 snapshot["outages"] = []
                 print("No active outages, skipping location fetch")
 
-    # Save snapshot
+    # Build a comparable fingerprint of this snapshot's meaningful data
+    summary_totals = snapshot.get("summary", {}).get("summaryFileData", {}).get("totals", [{}])[0]
+    fingerprint = {
+        "cust_a": summary_totals.get("total_cust_a", {}).get("val", 0),
+        "outages": summary_totals.get("total_outages", 0),
+        "outage_ids": sorted([o.get("id") for o in snapshot.get("outages", [])])
+    }
+
+    # Save snapshot - one file per day, one record per line, but only if changed
     os.makedirs("data", exist_ok=True)
     date_str = timestamp.strftime("%Y-%m-%d")
     filepath = f"data/{date_str}.jsonl"
+
+    last_fingerprint = None
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                # Read last ~8000 bytes to find the last line without loading whole file
+                read_size = min(size, 8000)
+                f.seek(size - read_size)
+                tail = f.read().decode("utf-8", errors="ignore")
+            last_line = tail.strip().split("\n")[-1]
+            last_record = json.loads(last_line)
+            last_summary = last_record.get("snapshot", {}).get("summary", {}).get("summaryFileData", {}).get("totals", [{}])[0]
+            last_fingerprint = {
+                "cust_a": last_summary.get("total_cust_a", {}).get("val", 0),
+                "outages": last_summary.get("total_outages", 0),
+                "outage_ids": sorted([o.get("id") for o in last_record.get("snapshot", {}).get("outages", [])])
+            }
+        except Exception as e:
+            print(f"Could not read last record for comparison: {e}")
+
+    if fingerprint == last_fingerprint:
+        print("No change since last snapshot, skipping write")
+        return
+
     with open(filepath, "a") as f:
         f.write(json.dumps({"timestamp": timestamp.isoformat(), "snapshot": snapshot}) + "\n")
-    print(f"Saved to {filepath}")
+    print(f"Change detected, saved to {filepath}")
 
 if __name__ == "__main__":
     main()
