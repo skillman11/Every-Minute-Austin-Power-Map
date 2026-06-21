@@ -1,13 +1,18 @@
 <!--
-  viewer.html v2.46
+  viewer.html v2.47
   Purpose: Browser-based dashboard for viewing historical Austin Energy outage data with map overlay
   How it works: Fetches .jsonl snapshot files from the GitHub repo and displays outage counts
                 over time as an interactive bar chart, plots individual outage locations on a
-                Leaflet map, and shows a scrollable event log. Clicking a bar jumps the map to
-                that timestamp. Slider and chart stay in sync.
+                Leaflet map, and shows a scrollable event log of only the moments where the
+                numbers actually changed. Clicking a bar jumps the map to that timestamp.
   Data source: data/YYYY-MM-DD.jsonl files collected by scrape.py via scrape.yml GitHub Action
   Linked files: depends on scrape.py (data collection) and scrape.yml (scheduler)
   Hosted at: https://skillman11.github.io/Every-Minute-Austin-Power-Map/viewer.html
+  v2.47 - Event list and chart only show moments where numbers changed (dedupe consecutive
+           identical readings), bigger subtitle/card-title fonts, date field uses name="bday"
+           autocomplete trick to stop password-manager autofill popups, raw data now opens in
+           a readable popup instead of linking to GitHub's raw file view (which broke on
+           large files), version number visible in disclaimer footer
   v2.46 - Larger date picker, pointer cursor on hover, version in footer, raw data link, smoother slider
   v2.45 - Calendar date picker, click bar to jump map, Now button, chart/slider sync, larger disclaimer
   v2.44 - Title fits one line on mobile using fluid font size
@@ -62,7 +67,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .subtitle { font-size: 15px; color: #64748b; margin-bottom: 14px; line-height: 1.4; }
+  .subtitle { font-size: 17px; color: #94a3b8; margin-bottom: 14px; line-height: 1.4; }
 
   /* TOP ROW */
   .top-row {
@@ -131,7 +136,7 @@
     padding: 16px;
   }
   .right-col { display: flex; flex-direction: column; gap: 16px; }
-  .card-title { font-size: 16px; font-weight: 500; color: #94a3b8; margin-bottom: 12px; }
+  .card-title { font-size: 18px; font-weight: 500; color: #b4c0d3; margin-bottom: 12px; }
 
   /* Map */
   #map {
@@ -263,11 +268,11 @@
 <div class="top-row">
   <div class="metric"><div class="metric-label">Peak customers affected</div><div class="metric-value danger" id="metPeak">-</div></div>
   <div class="metric"><div class="metric-label">Peak outages</div><div class="metric-value danger" id="metOutages">-</div></div>
-  <div class="metric"><div class="metric-label">Snapshots</div><div class="metric-value" id="metSnaps">-</div></div>
+  <div class="metric"><div class="metric-label">Readings taken</div><div class="metric-value" id="metSnaps">-</div></div>
   <div class="metric"><div class="metric-label">Customers served</div><div class="metric-value ok" id="metTotal">-</div></div>
   <div class="date-picker">
     <label for="dateSelect">Date</label>
-    <input type="date" id="dateSelect" onchange="loadData()" />
+    <input type="date" id="dateSelect" onchange="loadData()" autocomplete="off" name="outage-date-filter" data-form-type="other" data-lpignore="true" data-1p-ignore data-dashlane-ignore="true" />
   </div>
 </div>
 
@@ -306,10 +311,32 @@
 
 <div class="disclaimer">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-    <span style="color:#94a3b8;font-weight:500;">Every Minute Austin Power Map &mdash; viewer.html v2.46</span>
-    <a id="rawDataLink" href="#" target="_blank" style="color:#3b82f6;text-decoration:none;font-weight:500;">&#128196; View raw data file</a>
+    <span style="color:#94a3b8;font-weight:500;">Every Minute Austin Power Map &mdash; viewer.html v2.47</span>
+    <button id="rawDataBtn" onclick="showRawDataPopup()" style="background:none;border:none;color:#3b82f6;text-decoration:none;font-weight:500;cursor:pointer;font-size:inherit;padding:0;">&#128196; View readable data log</button>
   </div>
   This is an unofficial tool not affiliated with Austin Energy or the City of Austin. Data is collected from publicly available sources and may be delayed, incomplete, or inaccurate. Not intended for emergency use. The developer assumes no liability for any decisions made based on this data. For official outage information contact Austin Energy at 512-322-9100 or austinenergy.com.
+</div>
+
+<!-- Readable data popup -->
+<div id="rawDataModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center; padding:20px;">
+  <div style="background:#1e2433; border:0.5px solid #334155; border-radius:12px; max-width:700px; width:100%; max-height:80vh; display:flex; flex-direction:column;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:18px 20px; border-bottom:0.5px solid #334155;">
+      <span style="font-size:18px; font-weight:600; color:#f1f5f9;">Outage readings — <span id="rawModalDate"></span></span>
+      <button onclick="document.getElementById('rawDataModal').style.display='none'" style="background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;line-height:1;">&times;</button>
+    </div>
+    <div style="overflow-y:auto; padding:10px 20px;">
+      <table style="width:100%; border-collapse:collapse; font-size:15px;">
+        <thead>
+          <tr style="text-align:left; color:#64748b; font-size:13px; text-transform:uppercase;">
+            <th style="padding:10px 8px;">Time</th>
+            <th style="padding:10px 8px;">Customers affected</th>
+            <th style="padding:10px 8px;">Outages</th>
+          </tr>
+        </thead>
+        <tbody id="rawModalBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -319,6 +346,8 @@ let markers = [];
 let allRecords = [];
 let currentIndex = 0;
 let outageEventIndices = []; // maps event rows to record indices
+let chartIndexMap = []; // maps chart bar position to record index (deduped)
+let currentLoadedDate = '';
 
 const REPO_OWNER = 'skillman11';
 const REPO_NAME = 'Every-Minute-Austin-Power-Map';
@@ -384,13 +413,17 @@ function jumpToIndex(idx) {
   document.getElementById('mapTimeLabel').textContent = new Date(record.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true});
   showOutagesOnMap(record);
 
-  // Highlight active bar in chart
-  if (chartInstance) {
-    chartInstance.data.datasets[0].backgroundColor = chartInstance.data.datasets[0].backgroundColor.map
-      ? chartInstance.data.datasets[0].backgroundColor
-      : Array(allRecords.length).fill('rgba(239,68,68,0.75)');
-    const colors = Array(allRecords.length).fill('rgba(239,68,68,0.75)');
-    colors[idx] = 'rgba(255,200,0,0.9)';
+  // Highlight active bar in chart - find which deduped bar corresponds to this record
+  if (chartInstance && chartIndexMap.length) {
+    const colors = chartIndexMap.map(recIdx => recIdx === idx ? 'rgba(255,200,0,0.9)' : 'rgba(239,68,68,0.75)');
+    // If exact index isn't a bar boundary, highlight the bar covering this idx (last bar whose origIndex <= idx)
+    if (!chartIndexMap.includes(idx)) {
+      let coveringBar = 0;
+      for (let b = 0; b < chartIndexMap.length; b++) {
+        if (chartIndexMap[b] <= idx) coveringBar = b;
+      }
+      colors[coveringBar] = 'rgba(255,200,0,0.9)';
+    }
     chartInstance.data.datasets[0].backgroundColor = colors;
     chartInstance.update('none');
   }
@@ -419,8 +452,7 @@ async function loadData() {
     const text = await resp.text();
     allRecords = text.trim().split('\n').filter(l=>l.trim()).map(l=>{try{return JSON.parse(l);}catch(e){return null;}}).filter(Boolean);
     if (allRecords.length === 0) { showStatus('No valid records found.'); return; }
-    const rawLink = document.getElementById('rawDataLink');
-    if (rawLink) rawLink.href = `https://github.com/${REPO_OWNER}/${REPO_NAME}/blob/main/data/${date}.jsonl`;
+    currentLoadedDate = date;
     renderDashboard(allRecords);
   } catch(e) {
     showStatus(`Failed to load: ${e.message}`);
@@ -431,25 +463,54 @@ function renderDashboard(records) {
   document.getElementById('statusMsg').style.display = 'none';
   document.getElementById('mainContent').style.display = 'block';
 
+  // Dedupe: collapse consecutive records where cust affected AND outage count are identical.
+  // Keeps the LAST reading of each unchanged streak (most recent timestamp for that state).
+  const changedRecords = [];
+  let lastKey = null;
+  for (let i = 0; i < records.length; i++) {
+    const summary = records[i].snapshot?.summary?.summaryFileData?.totals?.[0];
+    const cust = summary?.total_cust_a?.val ?? 0;
+    const outages = summary?.total_outages ?? 0;
+    const key = `${cust}|${outages}`;
+    if (key !== lastKey) {
+      changedRecords.push({ record: records[i], origIndex: i });
+      lastKey = key;
+    } else {
+      // Same as previous reading - update the last entry's index so the timestamp
+      // shown reflects how long this state persisted, but don't add a new row
+      changedRecords[changedRecords.length - 1].record = records[i];
+      changedRecords[changedRecords.length - 1].origIndex = i;
+    }
+  }
+
   const timestamps=[], custAffected=[], outageEvents=[];
   outageEventIndices = [];
   let peakCust=0, peakOutages=0, totalCust=0;
 
-  for (let i = 0; i < records.length; i++) {
-    const rec = records[i];
+  // Peak/total metrics still computed from the FULL record set, not the deduped one
+  for (const rec of records) {
+    const summary = rec.snapshot?.summary?.summaryFileData?.totals?.[0];
+    const cust = summary?.total_cust_a?.val ?? 0;
+    const outages = summary?.total_outages ?? 0;
+    const total = summary?.total_cust_s ?? 0;
+    if (cust > peakCust) peakCust = cust;
+    if (outages > peakOutages) peakOutages = outages;
+    if (total > totalCust) totalCust = total;
+  }
+
+  // Chart and events list use the DEDUPED set so repeated identical numbers don't clutter the view
+  chartIndexMap = [];
+  for (const { record: rec, origIndex } of changedRecords) {
     const ts = new Date(rec.timestamp);
     timestamps.push(ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:true}));
     const summary = rec.snapshot?.summary?.summaryFileData?.totals?.[0];
     const cust = summary?.total_cust_a?.val ?? 0;
     const outages = summary?.total_outages ?? 0;
-    const total = summary?.total_cust_s ?? 0;
     custAffected.push(cust);
-    if (cust > peakCust) peakCust = cust;
-    if (outages > peakOutages) peakOutages = outages;
-    if (total > totalCust) totalCust = total;
+    chartIndexMap.push(origIndex);
     if (cust > 0) {
-      outageEvents.push({time: timestamps[timestamps.length-1], cust, outages, idx: i});
-      outageEventIndices.push(i);
+      outageEvents.push({time: timestamps[timestamps.length-1], cust, outages, idx: origIndex});
+      outageEventIndices.push(origIndex);
     }
   }
 
@@ -461,7 +522,7 @@ function renderDashboard(records) {
   // Bar chart with click handler
   if (chartInstance) chartInstance.destroy();
   const fontSize = Math.max(12, Math.round(window.innerWidth / 100));
-  const colors = Array(records.length).fill('rgba(239,68,68,0.75)');
+  const colors = Array(custAffected.length).fill('rgba(239,68,68,0.75)');
 
   chartInstance = new Chart(document.getElementById('outageChart').getContext('2d'), {
     type: 'bar',
@@ -480,7 +541,7 @@ function renderDashboard(records) {
       responsive: true,
       maintainAspectRatio: false,
       onClick: (evt, elements) => {
-        if (elements.length > 0) jumpToIndex(elements[0].index);
+        if (elements.length > 0) jumpToIndex(chartIndexMap[elements[0].index]);
       },
       plugins: {
         legend: { display: false },
@@ -525,6 +586,39 @@ function showStatus(msg) {
   const el = document.getElementById('statusMsg');
   el.style.display = 'block';
   el.textContent = msg;
+}
+
+function showRawDataPopup() {
+  if (!allRecords.length) return;
+
+  // Build the same deduped, human-readable list shown in the events card,
+  // but oldest-first here since that reads more naturally as a log
+  const rows = [];
+  let lastKey = null;
+  for (const rec of allRecords) {
+    const summary = rec.snapshot?.summary?.summaryFileData?.totals?.[0];
+    const cust = summary?.total_cust_a?.val ?? 0;
+    const outages = summary?.total_outages ?? 0;
+    const key = `${cust}|${outages}`;
+    const time = new Date(rec.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+    if (key !== lastKey) {
+      rows.push({ time, cust, outages });
+      lastKey = key;
+    } else {
+      rows[rows.length - 1].time = time; // extend the time range of the last unchanged row
+    }
+  }
+
+  document.getElementById('rawModalDate').textContent = currentLoadedDate || '';
+  document.getElementById('rawModalBody').innerHTML = rows.map(r =>
+    `<tr style="border-bottom:0.5px solid #1e293b;">
+      <td style="padding:9px 8px; color:#94a3b8;">${r.time}</td>
+      <td style="padding:9px 8px; color:#f87171; font-weight:600;">${r.cust.toLocaleString()}</td>
+      <td style="padding:9px 8px; color:#64748b;">${r.outages}</td>
+    </tr>`
+  ).join('');
+
+  document.getElementById('rawDataModal').style.display = 'flex';
 }
 
 document.addEventListener("DOMContentLoaded", function() {
